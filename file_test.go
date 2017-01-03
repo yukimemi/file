@@ -150,7 +150,39 @@ func TestBaseName(t *testing.T) {
 	}
 }
 
+// TestShareToAbs test ShareToAbs func.
+func TestShareToAbs(t *testing.T) {
+	p := "\\\\192.168.1.1\\C$\\test\\hoge\\bar.txt"
+	e := "C:\\test\\hoge\\bar.txt"
+
+	a := ShareToAbs(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+
+	p = "\\\\10.10.99.88\\d$\\パス\\トゥ\\日本語パス.txt.ext"
+	e = "d:\\パス\\トゥ\\日本語パス.txt.ext"
+
+	a = ShareToAbs(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+
+	p = "\\\\10.10.99.88\\d\\パス\\トゥ\\日本語パス.txt.ext"
+	e = "\\\\10.10.99.88\\d\\パス\\トゥ\\日本語パス.txt.ext"
+
+	a = ShareToAbs(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+}
+
+
 // TestMain is entry point.
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
+	shutdown()
 }

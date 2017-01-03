@@ -67,12 +67,27 @@ func IsExistDir(path string) bool {
 }
 
 // BaseName is get file name without extension.
-func BaseName(path string) string{
+func BaseName(path string) string {
 	base := filepath.Base(path)
 	ext := filepath.Ext(path)
 
-	re := regexp.MustCompile(ext+"$")
+	re := regexp.MustCompile(ext + "$")
 	return re.ReplaceAllString(base, "")
+}
+
+// ShareToAbs return abs path not shared.
+func ShareToAbs(path string) string {
+	rPath := []rune(path)
+	sep := '\\'
+	// Check shared path.
+	if (rPath[0] == sep) && (rPath[1] == sep)  {
+		re, err := regexp.Compile(`\\\\([^\\]+)\\(.)\$\\(.*)`)
+		if err != nil {
+			return path
+		}
+		return re.ReplaceAllString(path, "$2:\\$3")
+	}
+	return path
 }
 
 func getItem(root string, opt Option, target string) (chan Info, error) {
