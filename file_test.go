@@ -40,13 +40,17 @@ func TestGetFiles(t *testing.T) {
 
 	var opt Option
 	files, e := GetFiles(test, opt)
-	if e != nil { t.FailNow() }
+	if e != nil {
+		t.FailNow()
+	}
 	cnt := 0
 	for f := range files {
-		t.Log(f.path)
+		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt { t.Fail() }
+	if cnt != fileCnt {
+		t.Fail()
+	}
 	shutdown()
 }
 
@@ -58,13 +62,17 @@ func TestGetDirs(t *testing.T) {
 
 	var opt Option
 	dirs, e := GetDirs(test, opt)
-	if e != nil { t.FailNow() }
+	if e != nil {
+		t.FailNow()
+	}
 	cnt := 0
 	for d := range dirs {
-		t.Log(d.path)
+		t.Log(d.Path)
 		cnt++
 	}
-	if cnt != dirCnt { t.Fail() }
+	if cnt != dirCnt {
+		t.Fail()
+	}
 	shutdown()
 }
 
@@ -76,13 +84,17 @@ func TestGetFilesAndDirs(t *testing.T) {
 
 	var opt Option
 	files, e := GetFilesAndDirs(test, opt)
-	if e != nil { t.FailNow() }
+	if e != nil {
+		t.FailNow()
+	}
 	cnt := 0
 	for f := range files {
-		t.Log(f.path)
+		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt+dirCnt { t.Fail() }
+	if cnt != fileCnt+dirCnt {
+		t.Fail()
+	}
 	shutdown()
 }
 
@@ -92,20 +104,53 @@ func TestGetAllRecurse(t *testing.T) {
 	pwd, _ := os.Getwd()
 	test := filepath.Join(pwd, "test")
 
-	opt := Option{ recurse: true }
+	opt := Option{Recurse: true}
 	files, e := GetFiles(test, opt)
-	if e != nil { t.FailNow() }
+	if e != nil {
+		t.FailNow()
+	}
 	cnt := 0
 	for f := range files {
-		t.Log(f.path)
+		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt+dirCnt { t.Fail() }
+	if cnt != fileCnt+dirCnt {
+		t.Fail()
+	}
 	shutdown()
+}
+
+// TestBaseName is test BaseName fucn.
+func TestBaseName(t *testing.T) {
+	p := "/path/to/file.txt"
+	e := "file"
+
+	a := BaseName(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+
+	p = "/path/to/file.txt.ext"
+	e = "file.txt"
+
+	a = BaseName(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+
+	p = "/パス/トゥ/日本語パス.txt.ext"
+	e = "日本語パス.txt"
+
+	a = BaseName(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
 }
 
 // TestMain is entry point.
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
-

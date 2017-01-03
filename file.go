@@ -5,35 +5,37 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sync"
 )
 
 // Option is option of GetFiles func.
 type Option struct {
-	match   []string
-	ignore  []string
-	recurse bool
+	Match   []string
+	Ignore  []string
+	Recurse bool
 }
 
-// Path is return struct.
-type Path struct {
-	path string
-	e    error
+// Info is file information struct.
+type Info struct {
+	Path string
+	Fi   os.FileInfo
+	Err  error
 }
 
 // GetFiles return file paths.
-func GetFiles(root string, opt Option) (chan Path, error) {
+func GetFiles(root string, opt Option) (chan Info, error) {
 	return getItem(root, opt, "file")
 }
 
 // GetDirs return directory paths.
-func GetDirs(root string, opt Option) (chan Path, error) {
+func GetDirs(root string, opt Option) (chan Info, error) {
 	return getItem(root, opt, "dir")
 }
 
 // GetFilesAndDirs return file and directory paths.
-func GetFilesAndDirs(root string, opt Option) (chan Path, error) {
+func GetFilesAndDirs(root string, opt Option) (chan Info, error) {
 	return getItem(root, opt, "all")
 }
 
@@ -64,11 +66,20 @@ func IsExistDir(path string) bool {
 	return true
 }
 
-func getItem(root string, opt Option, target string) (chan Path, error) {
+// BaseName is get file name without extension.
+func BaseName(path string) string{
+	base := filepath.Base(path)
+	ext := filepath.Ext(path)
+
+	re := regexp.MustCompile(ext+"$")
+	return re.ReplaceAllString(base, "")
+}
+
+func getItem(root string, opt Option, target string) (chan Info, error) {
 	var (
 		e         error
 		fn        func(p string)
-		q         = make(chan Path)
+		q         = make(chan Info)
 		wg        = new(sync.WaitGroup)
 		semaphore = make(chan int, runtime.NumCPU())
 	)
@@ -80,7 +91,7 @@ func getItem(root string, opt Option, target string) (chan Path, error) {
 
 	// Get file list func.
 	fn = func(p string) {
-		var path Path
+		var info Info
 
 		semaphore <- 1
 		defer func() {
@@ -90,23 +101,24 @@ func getItem(root string, opt Option, target string) (chan Path, error) {
 
 		fis, e := ioutil.ReadDir(p)
 		if e != nil {
-			path.e = e
-			q <- path
+			info.Err = e
+			q <- info
 			return
 		}
 		for _, fi := range fis {
-			path.path = filepath.Join(p, fi.Name())
+			info.Path = filepath.Join(p, fi.Name())
+			info.Fi = fi
 			if fi.IsDir() {
 				if target != "file" {
-					q <- path
+					q <- info
 				}
-				if opt.recurse {
+				if opt.Recurse {
 					wg.Add(1)
-					go fn(path.path)
+					go fn(info.Path)
 				}
 			} else {
 				if target != "dir" {
-					q <- path
+					q <- info
 				}
 			}
 		}
