@@ -80,7 +80,7 @@ func ShareToAbs(path string) string {
 	rPath := []rune(path)
 	sep := '\\'
 	// Check shared path.
-	if (rPath[0] == sep) && (rPath[1] == sep)  {
+	if (rPath[0] == sep) && (rPath[1] == sep) {
 		re, err := regexp.Compile(`\\\\([^\\]+)\\(.)\$\\(.*)`)
 		if err != nil {
 			return path
@@ -92,7 +92,7 @@ func ShareToAbs(path string) string {
 
 func getItem(root string, opt Option, target string) (chan Info, error) {
 	var (
-		e         error
+		err       error
 		fn        func(p string)
 		q         = make(chan Info)
 		wg        = new(sync.WaitGroup)
@@ -114,9 +114,9 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 			<-semaphore
 		}()
 
-		fis, e := ioutil.ReadDir(p)
-		if e != nil {
-			info.Err = e
+		fis, err := ioutil.ReadDir(p)
+		if err != nil {
+			info.Err = err
 			q <- info
 			return
 		}
@@ -149,5 +149,5 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 		close(q)
 	}()
 
-	return q, e
+	return q, err
 }
