@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -88,6 +89,14 @@ func ShareToAbs(path string) string {
 		return re.ReplaceAllString(path, "$2:\\$3")
 	}
 	return path
+}
+
+// GetCmdPath returns cmd abs path.
+func GetCmdPath(cmd string) (string, error) {
+	if filepath.IsAbs(cmd) {
+		return cmd, nil
+	}
+	return exec.LookPath(cmd)
 }
 
 func getItem(root string, opt Option, target string) (chan Info, error) {

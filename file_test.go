@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -200,6 +201,36 @@ func TestShareToAbs(t *testing.T) {
 	e = "\\\\10.10.99.88\\d\\パス\\トゥ\\日本語パス.txt.ext"
 
 	a = ShareToAbs(p)
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+}
+
+// TestGetCmdPath test GetCmdPath func.
+func TestGetCmdPath(t *testing.T) {
+	p := "go"
+	e, err := exec.LookPath("go")
+	if err != nil {
+		t.Fail()
+	}
+
+	a, err := GetCmdPath(p)
+	if err != nil {
+		t.Fail()
+	}
+	if a != e {
+		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
+		t.Fail()
+	}
+
+	p = "C:\\bin\\go"
+	e = "C:\\bin\\go"
+
+	a, err = GetCmdPath(p)
+	if err != nil {
+		t.Fail()
+	}
 	if a != e {
 		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
 		t.Fail()
