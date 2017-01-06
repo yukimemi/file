@@ -2,6 +2,7 @@ package file
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,36 +11,67 @@ import (
 const fileCnt = 3
 const dirCnt = 3
 
-func setup() {
-	pwd, _ := os.Getwd()
-	test := filepath.Join(pwd, "test")
-	os.MkdirAll(test, os.ModePerm)
+func setup() string {
+	temp, err := ioutil.TempDir("", "test")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	for i := 0; i < fileCnt; i++ {
-		os.Create(filepath.Join(test, "file"+fmt.Sprint(i)))
+		os.Create(filepath.Join(temp, "file"+fmt.Sprint(i)))
 	}
 	for i := 0; i < dirCnt; i++ {
-		d := filepath.Join(test, "dir"+fmt.Sprint(i))
-		os.MkdirAll(d, os.ModePerm)
+		d := filepath.Join(temp, "dir"+fmt.Sprint(i))
+		err := os.MkdirAll(d, os.ModePerm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
 		os.Create(filepath.Join(d, "file"+fmt.Sprint(i)))
 	}
+	return temp
 }
 
-func shutdown() {
-	pwd, _ := os.Getwd()
-	test := filepath.Join(pwd, "test")
-	if IsExistDir(test) {
-		os.RemoveAll(test)
+func setup2() string {
+	temp, err := ioutil.TempDir("", "test")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
+	for i := 0; i < fileCnt; i++ {
+		os.Create(filepath.Join(temp, "hoge"+fmt.Sprint(i)))
+	}
+	for i := 0; i < fileCnt; i++ {
+		os.Create(filepath.Join(temp, "fuga"+fmt.Sprint(i)))
+	}
+	for i := 0; i < dirCnt; i++ {
+		d := filepath.Join(temp, "foo"+fmt.Sprint(i))
+		err := os.MkdirAll(d, os.ModePerm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Create(filepath.Join(d, "hoge"+fmt.Sprint(i)))
+	}
+	for i := 0; i < dirCnt; i++ {
+		d := filepath.Join(temp, "bar"+fmt.Sprint(i))
+		err := os.MkdirAll(d, os.ModePerm)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		os.Create(filepath.Join(d, "fuga"+fmt.Sprint(i)))
+	}
+	return temp
+}
+
+func shutdown(temp string) {
+	os.RemoveAll(temp)
 }
 
 // TestGetFiles is test GetFiles func.
 func TestGetFiles(t *testing.T) {
-	setup()
-	pwd, _ := os.Getwd()
-	test := filepath.Join(pwd, "test")
+	temp := setup()
 
 	var opt Option
-	files, e := GetFiles(test, opt)
+	files, e := GetFiles(temp, opt)
 	if e != nil {
 		t.FailNow()
 	}
@@ -51,17 +83,15 @@ func TestGetFiles(t *testing.T) {
 	if cnt != fileCnt {
 		t.Fail()
 	}
-	shutdown()
+	shutdown(temp)
 }
 
 // TestGetDirs is test GetFiles func.
 func TestGetDirs(t *testing.T) {
-	setup()
-	pwd, _ := os.Getwd()
-	test := filepath.Join(pwd, "test")
+	temp := setup()
 
 	var opt Option
-	dirs, e := GetDirs(test, opt)
+	dirs, e := GetDirs(temp, opt)
 	if e != nil {
 		t.FailNow()
 	}
@@ -73,17 +103,15 @@ func TestGetDirs(t *testing.T) {
 	if cnt != dirCnt {
 		t.Fail()
 	}
-	shutdown()
+	shutdown(temp)
 }
 
 // TestGetFilesAndDirs is test GetFilesAndDirs func.
 func TestGetFilesAndDirs(t *testing.T) {
-	setup()
-	pwd, _ := os.Getwd()
-	test := filepath.Join(pwd, "test")
+	temp := setup()
 
 	var opt Option
-	files, e := GetFilesAndDirs(test, opt)
+	files, e := GetFilesAndDirs(temp, opt)
 	if e != nil {
 		t.FailNow()
 	}
@@ -95,17 +123,15 @@ func TestGetFilesAndDirs(t *testing.T) {
 	if cnt != fileCnt+dirCnt {
 		t.Fail()
 	}
-	shutdown()
+	shutdown(temp)
 }
 
 // TestGetAllRecurse is test GetFilesAndDirs func with option recurse true.
 func TestGetAllRecurse(t *testing.T) {
-	setup()
-	pwd, _ := os.Getwd()
-	test := filepath.Join(pwd, "test")
+	temp := setup()
 
 	opt := Option{Recurse: true}
-	files, e := GetFiles(test, opt)
+	files, e := GetFiles(temp, opt)
 	if e != nil {
 		t.FailNow()
 	}
@@ -117,7 +143,7 @@ func TestGetAllRecurse(t *testing.T) {
 	if cnt != fileCnt+dirCnt {
 		t.Fail()
 	}
-	shutdown()
+	shutdown(temp)
 }
 
 // TestBaseName is test BaseName fucn.
@@ -180,9 +206,98 @@ func TestShareToAbs(t *testing.T) {
 	}
 }
 
+// TestGetFilesMatch is test GetFiles func with match option.
+func TestGetFilesMatch(t *testing.T) {
+	temp := setup2()
+
+	opt := Option{
+		Matches: []string{"hoge"},
+	}
+	files, e := GetFiles(temp, opt)
+	if e != nil {
+		t.FailNow()
+	}
+	cnt := 0
+	for f := range files {
+		t.Log(f.Path)
+		cnt++
+	}
+	if cnt != fileCnt {
+		t.Fail()
+	}
+	shutdown(temp)
+}
+
+// TestGetFilesIgnore is test GetFiles func with ignore option.
+func TestGetFilesIgnore(t *testing.T) {
+	temp := setup2()
+
+	opt := Option{
+		Ignores: []string{"hoge"},
+	}
+	files, e := GetFiles(temp, opt)
+	if e != nil {
+		t.FailNow()
+	}
+	cnt := 0
+	for f := range files {
+		t.Log(f.Path)
+		cnt++
+	}
+	if cnt != fileCnt {
+		t.Fail()
+	}
+	shutdown(temp)
+}
+
+// TestGetFilesMatchIgnore is test GetFiles func with match and ignore option.
+func TestGetFilesMatchIgnore(t *testing.T) {
+	temp := setup2()
+
+	opt := Option{
+		Matches: []string{"fuga"},
+		Ignores: []string{"hoge", "fuga0$"},
+	}
+	files, e := GetFiles(temp, opt)
+	if e != nil {
+		t.FailNow()
+	}
+	cnt := 0
+	for f := range files {
+		t.Log(f.Path)
+		cnt++
+	}
+	if cnt != fileCnt-1 {
+		t.Fail()
+	}
+	shutdown(temp)
+}
+
+// TestGetFilesMatchIgnoreRecurse is test GetFiles func with match, ignore and recurse option.
+func TestGetFilesMatchIgnoreRecurse(t *testing.T) {
+	temp := setup2()
+
+	opt := Option{
+		Matches: []string{"fuga"},
+		Ignores: []string{"hoge", "fuga0$"},
+		Recurse: true,
+	}
+	files, e := GetFiles(temp, opt)
+	if e != nil {
+		t.FailNow()
+	}
+	cnt := 0
+	for f := range files {
+		t.Log(f.Path)
+		cnt++
+	}
+	if cnt != fileCnt*2-2 {
+		t.Fail()
+	}
+	// shutdown(temp)
+}
 
 // TestMain is entry point.
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
-	shutdown()
 }

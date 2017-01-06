@@ -12,8 +12,8 @@ import (
 
 // Option is option of GetFiles func.
 type Option struct {
-	Match   []string
-	Ignore  []string
+	Matches []string
+	Ignores []string
 	Recurse bool
 }
 
@@ -78,9 +78,9 @@ func BaseName(path string) string {
 // ShareToAbs return abs path not shared.
 func ShareToAbs(path string) string {
 	rPath := []rune(path)
-	sep := '\\'
+	head := '\\'
 	// Check shared path.
-	if (rPath[0] == sep) && (rPath[1] == sep) {
+	if (rPath[0] == head) && (rPath[1] == head) {
 		re, err := regexp.Compile(`\\\\([^\\]+)\\(.)\$\\(.*)`)
 		if err != nil {
 			return path
@@ -94,6 +94,8 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 	var (
 		err       error
 		fn        func(p string)
+		matches   []*regexp.Regexp
+		ignores   []*regexp.Regexp
 		q         = make(chan Info)
 		wg        = new(sync.WaitGroup)
 		semaphore = make(chan int, runtime.NumCPU())
@@ -102,6 +104,26 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 	// Check root is directory.
 	if !IsExistDir(root) {
 		return nil, fmt.Errorf("[%s] is not a directory", root)
+	}
+
+	// Option check.
+	if len(opt.Matches) != 0 {
+		for _, s := range opt.Matches {
+			re, err := regexp.Compile(s)
+			if err != nil {
+				return nil, err
+			}
+			matches = append(matches, re)
+		}
+	}
+	if len(opt.Ignores) != 0 {
+		for _, s := range opt.Ignores {
+			re, err := regexp.Compile(s)
+			if err != nil {
+				return nil, err
+			}
+			ignores = append(ignores, re)
+		}
 	}
 
 	// Get file list func.
@@ -123,9 +145,16 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 		for _, fi := range fis {
 			info.Path = filepath.Join(p, fi.Name())
 			info.Fi = fi
+			// Check ignore.
+			if isIgnore(info.Path, ignores) {
+				continue
+			}
+
 			if fi.IsDir() {
 				if target != "file" {
-					q <- info
+					if isMatch(info.Path, matches) {
+						q <- info
+					}
 				}
 				if opt.Recurse {
 					wg.Add(1)
@@ -133,7 +162,9 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 				}
 			} else {
 				if target != "dir" {
-					q <- info
+					if isMatch(info.Path, matches) {
+						q <- info
+					}
 				}
 			}
 		}
@@ -150,4 +181,32 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 	}()
 
 	return q, err
+}
+
+func isMatch(path string, matches []*regexp.Regexp) bool {
+
+	if matches == nil {
+		return true
+	}
+
+	for _, re := range matches {
+		if re.MatchString(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func isIgnore(path string, ignores []*regexp.Regexp) bool {
+
+	if ignores == nil {
+		return false
+	}
+
+	for _, re := range ignores {
+		if re.MatchString(path) {
+			return true
+		}
+	}
+	return false
 }
