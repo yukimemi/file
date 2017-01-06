@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -224,8 +225,13 @@ func TestGetCmdPath(t *testing.T) {
 		t.Fail()
 	}
 
-	p = "C:\\bin\\go"
-	e = "C:\\bin\\go"
+	if runtime.GOOS == "windows" {
+		p = "C:\\bin\\go"
+		e = "C:\\bin\\go"
+	} else {
+		p = "/opt/local/bin/go"
+		e = "/opt/local/bin/go"
+	}
 
 	a, err = GetCmdPath(p)
 	if err != nil {
