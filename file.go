@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strings"
 	"sync"
+
+	"github.com/yukimemi/core"
 )
 
 // Option is option of GetFiles func.
@@ -16,6 +19,8 @@ type Option struct {
 	Matches []string
 	Ignores []string
 	Recurse bool
+	Depth   int
+	ErrSkip bool
 }
 
 // Info is file information struct.
@@ -24,6 +29,22 @@ type Info struct {
 	Fi   os.FileInfo
 	Err  error
 }
+
+// DirInfo is directory size and count information struct.
+type DirInfo struct {
+	Path      string
+	Fi        os.FileInfo
+	Size      int64
+	FileCount int64
+	DirCount  int64
+	Err       error
+	Sub       []*DirInfo
+}
+
+var (
+	shareRe1 = regexp.MustCompile(`\\\\([^\\]+)\\(.)\$\\(.*)`)
+	shareRe2 = regexp.MustCompile(`\\\\([^\\]+)\\(.)\$`)
+)
 
 // GetFiles return file paths.
 func GetFiles(root string, opt Option) (chan Info, error) {
@@ -82,11 +103,12 @@ func ShareToAbs(path string) string {
 	head := '\\'
 	// Check shared path.
 	if (rPath[0] == head) && (rPath[1] == head) {
-		re, err := regexp.Compile(`\\\\([^\\]+)\\(.)\$\\(.*)`)
-		if err != nil {
-			return path
+		if shareRe1.MatchString(path) {
+			return shareRe1.ReplaceAllString(path, "$2:\\$3")
 		}
-		return re.ReplaceAllString(path, "$2:\\$3")
+		if shareRe2.MatchString(path) {
+			return shareRe2.ReplaceAllString(path, "$2:")
+		}
 	}
 	return path
 }
@@ -99,15 +121,15 @@ func GetCmdPath(cmd string) (string, error) {
 	return exec.LookPath(cmd)
 }
 
-func getItem(root string, opt Option, target string) (chan Info, error) {
+// GetDirInfoAll is get directory size and count.
+func GetDirInfoAll(root string, opt Option) (chan DirInfo, error) {
+
 	var (
-		err       error
-		fn        func(p string)
-		matches   []*regexp.Regexp
-		ignores   []*regexp.Regexp
-		q         = make(chan Info)
-		wg        = new(sync.WaitGroup)
-		semaphore = make(chan int, runtime.NumCPU())
+		err    error
+		fn     func(p string) DirInfo
+		match  *regexp.Regexp
+		ignore *regexp.Regexp
+		q      = make(chan DirInfo)
 	)
 
 	// Check root is directory.
@@ -115,23 +137,184 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 		return nil, fmt.Errorf("[%s] is not a directory", root)
 	}
 
-	// Option check.
 	if len(opt.Matches) != 0 {
-		for _, s := range opt.Matches {
-			re, err := regexp.Compile(s)
-			if err != nil {
-				return nil, err
-			}
-			matches = append(matches, re)
+		match, err = core.CompileStrs(opt.Matches)
+		if err != nil {
+			return nil, err
 		}
 	}
 	if len(opt.Ignores) != 0 {
-		for _, s := range opt.Ignores {
-			re, err := regexp.Compile(s)
-			if err != nil {
-				return nil, err
+		ignore, err = core.CompileStrs(opt.Ignores)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Get directory size and count.
+	fn = func(p string) DirInfo {
+
+		var (
+			fis []os.FileInfo
+			di  = DirInfo{Path: p}
+		)
+
+		// Check ignore.
+		if ignore != nil && ignore.MatchString(p) {
+			return DirInfo{}
+		}
+
+		di.Fi, di.Err = os.Stat(p)
+		if di.Err != nil {
+			if opt.ErrSkip {
+				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", di.Err)
+				return DirInfo{}
 			}
-			ignores = append(ignores, re)
+			q <- di
+			return di
+		}
+
+		fis, di.Err = ioutil.ReadDir(p)
+		if di.Err != nil {
+			if opt.ErrSkip {
+				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", di.Err)
+				return DirInfo{}
+			}
+			q <- di
+			return di
+		}
+
+		for _, fi := range fis {
+
+			if fi.IsDir() {
+				di.DirCount++
+				if opt.Recurse {
+					sub := fn(filepath.Join(p, fi.Name()))
+					if sub.Path != "" {
+						di.Sub = append(di.Sub, &sub)
+					}
+					if sub.Err != nil {
+						if opt.ErrSkip {
+							fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", sub.Err)
+							continue
+						}
+						return di
+					}
+				}
+			} else {
+				di.FileCount++
+				di.Size += fi.Size()
+			}
+		}
+
+		if match == nil || match.MatchString(di.Path) {
+			q <- di
+		}
+		return di
+	}
+
+	// Start get item list.
+	go func() {
+		_ = fn(root)
+		close(q)
+	}()
+
+	return q, err
+}
+
+// GetDirInfoRecurse is get size and count under the DirInfo recurse.
+func GetDirInfoRecurse(di DirInfo, opt Option) DirInfo {
+
+	var (
+		d = DirInfo{
+			Path:      di.Path,
+			Size:      di.Size,
+			FileCount: di.FileCount,
+			DirCount:  di.DirCount,
+			Err:       di.Err,
+			Sub:       di.Sub,
+		}
+	)
+
+	if d.Err != nil {
+		return d
+	}
+
+	for _, sub := range di.Sub {
+		if sub.Err != nil {
+			if opt.ErrSkip {
+				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", sub.Err)
+				continue
+			}
+			d.Err = sub.Err
+			return d
+		}
+		subDi := GetDirInfoRecurse(*sub, opt)
+		if subDi.Err != nil {
+			if opt.ErrSkip {
+				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", subDi.Err)
+				continue
+			}
+			d.Err = subDi.Err
+			return d
+		}
+		d.FileCount += subDi.FileCount
+		d.DirCount += subDi.DirCount
+		d.Size += subDi.Size
+	}
+
+	return d
+}
+
+// GetDirInfo is get size and count the directory.
+func GetDirInfo(root string, opt Option) (DirInfo, error) {
+
+	dis, err := GetDirInfoAll(root, opt)
+	if err != nil {
+		return DirInfo{}, err
+	}
+
+	for di := range dis {
+		if di.Err != nil {
+			if opt.ErrSkip {
+				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", di.Err)
+				continue
+			}
+			return DirInfo{}, di.Err
+		}
+		if di.Path == root {
+			return GetDirInfoRecurse(di, opt), nil
+		}
+	}
+
+	return DirInfo{}, fmt.Errorf("Error occured")
+}
+
+func getItem(root string, opt Option, target string) (chan Info, error) {
+	var (
+		err       error
+		fn        func(p string)
+		match     *regexp.Regexp
+		ignore    *regexp.Regexp
+		q         = make(chan Info)
+		wg        = new(sync.WaitGroup)
+		semaphore = make(chan struct{}, runtime.NumCPU())
+	)
+
+	// Check root is directory.
+	if !IsExistDir(root) {
+		return nil, fmt.Errorf("[%s] is not a directory", root)
+	}
+
+	if len(opt.Matches) != 0 {
+		match, err = core.CompileStrs(opt.Matches)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(opt.Ignores) != 0 {
+		ignore, err = core.CompileStrs(opt.Ignores)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -139,7 +322,7 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 	fn = func(p string) {
 		var info Info
 
-		semaphore <- 1
+		semaphore <- struct{}{}
 		defer func() {
 			wg.Done()
 			<-semaphore
@@ -147,21 +330,26 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 
 		fis, err := ioutil.ReadDir(p)
 		if err != nil {
+			if opt.ErrSkip {
+				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", err)
+				return
+			}
 			info.Err = err
 			q <- info
 			return
 		}
 		for _, fi := range fis {
 			info.Path = filepath.Join(p, fi.Name())
-			info.Fi = fi
 			// Check ignore.
-			if isIgnore(info.Path, ignores) {
+			if ignore != nil && ignore.MatchString(info.Path) {
 				continue
 			}
 
+			info.Fi = fi
+
 			if fi.IsDir() {
 				if target != "file" {
-					if isMatch(info.Path, matches) {
+					if match == nil || match.MatchString(info.Path) {
 						q <- info
 					}
 				}
@@ -171,7 +359,7 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 				}
 			} else {
 				if target != "dir" {
-					if isMatch(info.Path, matches) {
+					if match == nil || match.MatchString(info.Path) {
 						q <- info
 					}
 				}
@@ -192,30 +380,8 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 	return q, err
 }
 
-func isMatch(path string, matches []*regexp.Regexp) bool {
-
-	if matches == nil {
-		return true
-	}
-
-	for _, re := range matches {
-		if re.MatchString(path) {
-			return true
-		}
-	}
-	return false
-}
-
-func isIgnore(path string, ignores []*regexp.Regexp) bool {
-
-	if ignores == nil {
-		return false
-	}
-
-	for _, re := range ignores {
-		if re.MatchString(path) {
-			return true
-		}
-	}
-	return false
+// GetDepth is return path depth.
+func GetDepth(path string) int {
+	p := filepath.Clean(path)
+	return strings.Count(p, string(filepath.Separator))
 }
