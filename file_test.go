@@ -279,15 +279,15 @@ func TestGetDepth(t *testing.T) {
 	p := "C:\\test\\hoge\\bar.txt"
 	e := 3
 
-	a := GetDepth(p)
+	a := GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
 	}
 
 	p = "\\\\10.10.99.88\\d$\\パス\\トゥ\\日本語パス.txt.ext"
-	e = 5
+	e = 4
 
-	a = GetDepth(p)
+	a = GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
 	}
@@ -295,15 +295,15 @@ func TestGetDepth(t *testing.T) {
 	p = "C:\\"
 	e = 1
 
-	a = GetDepth(p)
+	a = GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
 	}
 
 	p = "C:"
-	e = 1
+	e = 0
 
-	a = GetDepth(p)
+	a = GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
 	}
@@ -311,15 +311,15 @@ func TestGetDepth(t *testing.T) {
 	p = "\\\\10.10.99.88\\C$\\"
 	e = 2
 
-	a = GetDepth(p)
+	a = GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
 	}
 
 	p = "\\\\10.10.99.88\\C$"
-	e = 2
+	e = 1
 
-	a = GetDepth(p)
+	a = GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
 	}
