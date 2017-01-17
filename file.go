@@ -14,6 +14,13 @@ import (
 	"github.com/yukimemi/core"
 )
 
+const (
+	// WINSEPARATOR is windows path separator.
+	WINSEPARATOR = '\\'
+	// NIXSEPARATOR is unix, linux path separator.
+	NIXSEPARATOR = '/'
+)
+
 // Option is option of GetFiles func.
 type Option struct {
 	Matches []string
@@ -99,15 +106,12 @@ func BaseName(path string) string {
 
 // ShareToAbs return abs path not shared.
 func ShareToAbs(path string) string {
-	rPath := []rune(path)
-	head := '\\'
-	// Check shared path.
-	if (rPath[0] == head) && (rPath[1] == head) {
+	if IsShare(path) {
 		if shareRe1.MatchString(path) {
 			return shareRe1.ReplaceAllString(path, "$2:\\$3")
 		}
 		if shareRe2.MatchString(path) {
-			return shareRe2.ReplaceAllString(path, "$2:")
+			return shareRe2.ReplaceAllString(path, "$2:\\")
 		}
 	}
 	return path
@@ -381,7 +385,26 @@ func getItem(root string, opt Option, target string) (chan Info, error) {
 }
 
 // GetDepth is return path depth.
-func GetDepth(path string) int {
-	p := filepath.Clean(path)
-	return strings.Count(p, string(filepath.Separator))
+func GetDepth(path string, sep rune) int {
+	if sep == 0 {
+		sep = filepath.Separator
+	}
+	p := strings.Replace(filepath.Clean(path), string(sep)+string(sep), string(sep), -1)
+	c := strings.Count(p, string(sep))
+	if IsShare(path) {
+		return c - 1
+	}
+	return c
+}
+
+// IsShare is whether path is share or not.
+func IsShare(path string) bool {
+
+	rPath := []rune(path)
+	// Check shared path.
+	if ((rPath[0] == WINSEPARATOR) && (rPath[1] == WINSEPARATOR)) ||
+		((rPath[0] == NIXSEPARATOR) && (rPath[1] == NIXSEPARATOR)) {
+		return true
+	}
+	return false
 }
