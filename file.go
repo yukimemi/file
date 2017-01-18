@@ -111,7 +111,7 @@ func ShareToAbs(path string) string {
 			return shareRe1.ReplaceAllString(path, "$2:\\$3")
 		}
 		if shareRe2.MatchString(path) {
-			return shareRe2.ReplaceAllString(path, "$2:")
+			return shareRe2.ReplaceAllString(path, "$2:\\")
 		}
 	}
 	return path

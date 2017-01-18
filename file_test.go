@@ -258,7 +258,7 @@ func TestShareToAbs(t *testing.T) {
 	}
 
 	p = "\\\\10.10.99.88\\C$"
-	e = "C:"
+	e = "C:\\"
 
 	a = ShareToAbs(p)
 	if a != e {
@@ -266,7 +266,23 @@ func TestShareToAbs(t *testing.T) {
 	}
 
 	p = "\\\\10.10.99.88\\C$"
-	e = "C:"
+	e = "C:\\"
+
+	a = ShareToAbs(p)
+	if a != e {
+		t.Fatalf("Expected: [%s] but actual: [%s]\n", e, a)
+	}
+
+	p = "\\\\10.10.99.88\\D$"
+	e = "D:\\"
+
+	a = ShareToAbs(p)
+	if a != e {
+		t.Fatalf("Expected: [%s] but actual: [%s]\n", e, a)
+	}
+
+	p = "\\\\10.10.99.88\\d$"
+	e = "d:\\"
 
 	a = ShareToAbs(p)
 	if a != e {
