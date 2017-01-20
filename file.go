@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -95,15 +94,6 @@ func IsExistDir(path string) bool {
 	return true
 }
 
-// BaseName is get file name without extension.
-func BaseName(path string) string {
-	base := filepath.Base(path)
-	ext := filepath.Ext(path)
-
-	re := regexp.MustCompile(ext + "$")
-	return re.ReplaceAllString(base, "")
-}
-
 // ShareToAbs return abs path not shared.
 func ShareToAbs(path string) string {
 	if IsShare(path) {
@@ -115,14 +105,6 @@ func ShareToAbs(path string) string {
 		}
 	}
 	return path
-}
-
-// GetCmdPath returns cmd abs path.
-func GetCmdPath(cmd string) (string, error) {
-	if filepath.IsAbs(cmd) {
-		return cmd, nil
-	}
-	return exec.LookPath(cmd)
 }
 
 // GetDirInfoAll is get directory size and count.
