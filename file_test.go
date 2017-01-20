@@ -4,9 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -156,18 +154,18 @@ func TestGetDirs(t *testing.T) {
 		t.Log(d.Path)
 		cnt++
 	}
-	if cnt != dirCnt {
-		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt, cnt)
+	if cnt != dirCnt+1 {
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", dirCnt+1, cnt)
 	}
 }
 
-// TestGetFilesAndDirs is test GetFilesAndDirs func.
-func TestGetFilesAndDirs(t *testing.T) {
+// TestGetInfos is test GetInfos func.
+func TestGetInfos(t *testing.T) {
 	temp := setup()
 	defer shutdown(temp)
 
 	var opt Option
-	files, err := GetFilesAndDirs(temp, opt)
+	files, err := GetInfos(temp, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,18 +174,18 @@ func TestGetFilesAndDirs(t *testing.T) {
 		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt+dirCnt {
-		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt, cnt)
+	if cnt != fileCnt+dirCnt+1 {
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt+dirCnt+1, cnt)
 	}
 }
 
-// TestGetAllRecurse is test GetFilesAndDirs func with option recurse true.
-func TestGetAllRecurse(t *testing.T) {
+// TestGetInfosRecurse is test GetInfos func with option recurse true.
+func TestGetInfosRecurse(t *testing.T) {
 	temp := setup()
 	defer shutdown(temp)
 
 	opt := Option{Recurse: true}
-	files, err := GetFiles(temp, opt)
+	files, err := GetInfos(temp, opt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,38 +194,8 @@ func TestGetAllRecurse(t *testing.T) {
 		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt+dirCnt {
-		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt, cnt)
-	}
-}
-
-// TestBaseName is test BaseName fucn.
-func TestBaseName(t *testing.T) {
-	p := "/path/to/file.txt"
-	e := "file"
-
-	a := BaseName(p)
-	if a != e {
-		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
-		t.Fail()
-	}
-
-	p = "/path/to/file.txt.ext"
-	e = "file.txt"
-
-	a = BaseName(p)
-	if a != e {
-		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
-		t.Fail()
-	}
-
-	p = "/パス/トゥ/日本語パス.txt.ext"
-	e = "日本語パス.txt"
-
-	a = BaseName(p)
-	if a != e {
-		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
-		t.Fail()
+	if cnt != fileCnt*2+dirCnt+1 {
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt*2+dirCnt+1, cnt)
 	}
 }
 
@@ -341,41 +309,6 @@ func TestGetDepth(t *testing.T) {
 	}
 }
 
-// TestGetCmdPath test GetCmdPath func.
-func TestGetCmdPath(t *testing.T) {
-	p := "go"
-	e, err := exec.LookPath("go")
-	if err != nil {
-		t.Fail()
-	}
-
-	a, err := GetCmdPath(p)
-	if err != nil {
-		t.Fail()
-	}
-	if a != e {
-		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
-		t.Fail()
-	}
-
-	if runtime.GOOS == "windows" {
-		p = "C:\\bin\\go"
-		e = "C:\\bin\\go"
-	} else {
-		p = "/opt/local/bin/go"
-		e = "/opt/local/bin/go"
-	}
-
-	a, err = GetCmdPath(p)
-	if err != nil {
-		t.Fail()
-	}
-	if a != e {
-		t.Errorf("Expected: [%s] but actual: [%s]\n", e, a)
-		t.Fail()
-	}
-}
-
 // TestGetFilesMatch is test GetFiles func with match option.
 func TestGetFilesMatch(t *testing.T) {
 	temp := setup2()
@@ -394,7 +327,7 @@ func TestGetFilesMatch(t *testing.T) {
 		cnt++
 	}
 	if cnt != fileCnt {
-		t.Fail()
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt, cnt)
 	}
 }
 
@@ -416,7 +349,7 @@ func TestGetFilesIgnore(t *testing.T) {
 		cnt++
 	}
 	if cnt != fileCnt {
-		t.Fail()
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", fileCnt, cnt)
 	}
 }
 
@@ -426,8 +359,8 @@ func TestGetFilesMatchIgnore(t *testing.T) {
 	defer shutdown(temp)
 
 	opt := Option{
-		Matches: []string{"fuga"},
-		Ignores: []string{"hoge", "fuga0$"},
+		Ignores: []string{"hoge", "fuga"},
+		Matches: []string{"fuga0$"},
 	}
 	files, e := GetFiles(temp, opt)
 	if e != nil {
@@ -438,8 +371,8 @@ func TestGetFilesMatchIgnore(t *testing.T) {
 		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt-1 {
-		t.Fail()
+	if cnt != 1 {
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", 1, cnt)
 	}
 }
 
@@ -449,8 +382,8 @@ func TestGetFilesMatchIgnoreRecurse(t *testing.T) {
 	defer shutdown(temp)
 
 	opt := Option{
-		Matches: []string{"fuga"},
-		Ignores: []string{"hoge", "fuga0$"},
+		Ignores: []string{"hoge", "fuga"},
+		Matches: []string{"fuga0$"},
 		Recurse: true,
 	}
 	files, e := GetFiles(temp, opt)
@@ -462,71 +395,25 @@ func TestGetFilesMatchIgnoreRecurse(t *testing.T) {
 		t.Log(f.Path)
 		cnt++
 	}
-	if cnt != fileCnt*2-2 {
-		t.Fail()
+	if cnt != 2 {
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", 2, cnt)
 	}
-}
-
-// TestGetDirInfoAll is test GetDirInfoAll func.
-func TestGetDirInfoAll(t *testing.T) {
-	var (
-		temp         string
-		dis          chan DirInfo
-		afc, adc, as int64
-
-		opt       = Option{Recurse: true}
-		efc int64 = fileCnt * 2
-		edc int64 = dirCnt
-		es  int64 = 4 * 2
-	)
-
-	temp = setup()
-	defer shutdown(temp)
-
-	err = ioutil.WriteFile(filepath.Join(temp, "file0"), []byte{'t', 'e', 's', 't'}, os.ModePerm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = ioutil.WriteFile(filepath.Join(filepath.Join(temp, "dir0"), "file0"), []byte{'t', 'e', 's', 't'}, os.ModePerm)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	dis, err = GetDirInfoAll(temp, opt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for di := range dis {
-		afc += di.FileCount
-		adc += di.DirCount
-		as += di.Size
-	}
-	if afc != efc {
-		t.Fatalf("File count expected: [%d] but actual: [%d]\n", efc, afc)
-	}
-	if adc != edc {
-		t.Fatalf("Dir count expected: [%d] but actual: [%d]\n", edc, adc)
-	}
-	if as != es {
-		t.Fatalf("Size expected: [%d] but actual: [%d]\n", es, as)
-	}
-
 }
 
 // TestGetDirInfo is test GetDirInfo func.
 func TestGetDirInfo(t *testing.T) {
 	var (
 		temp         string
-		di           DirInfo
 		afc, adc, as int64
 
-		opt       = Option{Recurse: true}
 		efc int64 = fileCnt*2 + dirCnt*4
 		edc int64 = dirCnt * 4
 		es  int64 = 4 * 3
 	)
 	temp = setup3()
+	t.Log(temp)
 	defer shutdown(temp)
+
 	f0 := filepath.Join(temp, "file0")
 	d0f0 := filepath.Join(filepath.Join(temp, "dir0"), "file0")
 	d0d0f0 := filepath.Join(filepath.Join(filepath.Join(temp, "dir0"), "dir0"), "file0")
@@ -544,13 +431,13 @@ func TestGetDirInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	di, err = GetDirInfo(temp, opt)
+	di := GetDirInfo(temp)
 	if err != nil {
 		t.Fatal(err)
 	}
 	afc = di.FileCount
 	adc = di.DirCount
-	as = di.Size
+	as = di.DirSize
 
 	if afc != efc {
 		t.Fatalf("File count expected: [%d] but actual: [%d]\n", efc, afc)

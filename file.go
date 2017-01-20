@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -23,11 +22,14 @@ const (
 
 // Option is option of GetFiles func.
 type Option struct {
-	Matches []string
-	Ignores []string
-	Recurse bool
-	Depth   int
-	ErrSkip bool
+	Matches  []string
+	Ignores  []string
+	Recurse  bool
+	matchRe  *regexp.Regexp
+	ignoreRe *regexp.Regexp
+	getFile  bool
+	getDir   bool
+	Depth    int
 }
 
 // Info is file information struct.
@@ -37,15 +39,12 @@ type Info struct {
 	Err  error
 }
 
-// DirInfo is directory size and count information struct.
+// DirInfo is directory information struct.
 type DirInfo struct {
-	Path      string
-	Fi        os.FileInfo
-	Size      int64
-	FileCount int64
+	Info
+	DirSize   int64
 	DirCount  int64
-	Err       error
-	Sub       []*DirInfo
+	FileCount int64
 }
 
 var (
@@ -53,25 +52,68 @@ var (
 	shareRe2 = regexp.MustCompile(`\\\\([^\\]+)\\(.)\$`)
 )
 
-// GetFiles return file paths.
+// GetFiles return file infos.
 func GetFiles(root string, opt Option) (chan Info, error) {
-	return getItem(root, opt, "file")
+	opt.getFile = true
+	opt, err := compileRegexps(opt)
+	if err != nil {
+		return nil, err
+	}
+	return getInfo(root, opt)
 }
 
-// GetDirs return directory paths.
+// GetDirs return directory infos.
 func GetDirs(root string, opt Option) (chan Info, error) {
-	return getItem(root, opt, "dir")
+	opt.getDir = true
+	opt, err := compileRegexps(opt)
+	if err != nil {
+		return nil, err
+	}
+	return getInfo(root, opt)
 }
 
-// GetFilesAndDirs return file and directory paths.
-func GetFilesAndDirs(root string, opt Option) (chan Info, error) {
-	return getItem(root, opt, "all")
+// GetInfos return file and directory infos.
+func GetInfos(root string, opt Option) (chan Info, error) {
+	opt.getFile, opt.getDir = true, true
+	opt, err := compileRegexps(opt)
+	if err != nil {
+		return nil, err
+	}
+	return getInfo(root, opt)
+}
+
+func asyncToSync(root string, opt Option, fn func(string, Option) (chan Info, error)) Info {
+	infos, err := fn(root, opt)
+	if err != nil {
+		return Info{Err: err}
+	}
+	for info := range infos {
+		if info.Path == root {
+			return info
+		}
+	}
+	return Info{Err: fmt.Errorf("Error ! Not found [%v]", root)}
+}
+
+// GetFile return file info.
+func GetFile(root string, opt Option) Info {
+	return asyncToSync(root, opt, GetFiles)
+}
+
+// GetDir return directory info.
+func GetDir(root string, opt Option) Info {
+	return asyncToSync(root, opt, GetDirs)
+}
+
+// GetInfo return file and directory info.
+func GetInfo(root string, opt Option) Info {
+	return asyncToSync(root, opt, GetInfos)
 }
 
 // IsExist is check file or directory exist.
 func IsExist(path string) bool {
-	_, e := os.Stat(path)
-	if e != nil {
+	_, err := os.Stat(path)
+	if err != nil {
 		return false
 	}
 	return true
@@ -79,8 +121,8 @@ func IsExist(path string) bool {
 
 // IsExistFile is check file exist.
 func IsExistFile(path string) bool {
-	fi, e := os.Stat(path)
-	if e != nil || fi.IsDir() {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
 		return false
 	}
 	return true
@@ -88,20 +130,11 @@ func IsExistFile(path string) bool {
 
 // IsExistDir is check directory exist.
 func IsExistDir(path string) bool {
-	fi, e := os.Stat(path)
-	if e != nil || !fi.IsDir() {
+	fi, err := os.Stat(path)
+	if err != nil || !fi.IsDir() {
 		return false
 	}
 	return true
-}
-
-// BaseName is get file name without extension.
-func BaseName(path string) string {
-	base := filepath.Base(path)
-	ext := filepath.Ext(path)
-
-	re := regexp.MustCompile(ext + "$")
-	return re.ReplaceAllString(base, "")
 }
 
 // ShareToAbs return abs path not shared.
@@ -117,266 +150,115 @@ func ShareToAbs(path string) string {
 	return path
 }
 
-// GetCmdPath returns cmd abs path.
-func GetCmdPath(cmd string) (string, error) {
-	if filepath.IsAbs(cmd) {
-		return cmd, nil
-	}
-	return exec.LookPath(cmd)
-}
+// GetDirInfo return DirSize, FileCount and DirCount.
+func GetDirInfo(path string) DirInfo {
 
-// GetDirInfoAll is get directory size and count.
-func GetDirInfoAll(root string, opt Option) (chan DirInfo, error) {
+	i := Info{Path: path}
+	di := DirInfo{Info: i}
 
-	var (
-		err    error
-		fn     func(p string) DirInfo
-		match  *regexp.Regexp
-		ignore *regexp.Regexp
-		q      = make(chan DirInfo)
-	)
-
-	// Check root is directory.
-	if !IsExistDir(root) {
-		return nil, fmt.Errorf("[%s] is not a directory", root)
-	}
-
-	if len(opt.Matches) != 0 {
-		match, err = core.CompileStrs(opt.Matches)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if len(opt.Ignores) != 0 {
-		ignore, err = core.CompileStrs(opt.Ignores)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Get directory size and count.
-	fn = func(p string) DirInfo {
-
-		var (
-			fis []os.FileInfo
-			di  = DirInfo{Path: p}
-		)
-
-		// Check ignore.
-		if ignore != nil && ignore.MatchString(p) {
-			return DirInfo{}
-		}
-
-		di.Fi, di.Err = os.Stat(p)
-		if di.Err != nil {
-			if opt.ErrSkip {
-				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", di.Err)
-				return DirInfo{}
-			}
-			q <- di
-			return di
-		}
-
-		fis, di.Err = ioutil.ReadDir(p)
-		if di.Err != nil {
-			if opt.ErrSkip {
-				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", di.Err)
-				return DirInfo{}
-			}
-			q <- di
-			return di
-		}
-
-		for _, fi := range fis {
-
-			if fi.IsDir() {
-				di.DirCount++
-				if opt.Recurse {
-					sub := fn(filepath.Join(p, fi.Name()))
-					if sub.Path != "" {
-						di.Sub = append(di.Sub, &sub)
-					}
-					if sub.Err != nil {
-						if opt.ErrSkip {
-							fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", sub.Err)
-							continue
-						}
-						return di
-					}
-				}
-			} else {
-				di.FileCount++
-				di.Size += fi.Size()
-			}
-		}
-
-		if match == nil || match.MatchString(di.Path) {
-			q <- di
-		}
+	infos, err := GetInfos(path, Option{Recurse: true})
+	if err != nil {
+		di.Err = err
 		return di
 	}
 
-	// Start get item list.
-	go func() {
-		_ = fn(root)
-		close(q)
-	}()
-
-	return q, err
+	for i := range infos {
+		if i.Err != nil {
+			di.Err = i.Err
+			continue
+		}
+		if i.Fi.IsDir() {
+			di.DirCount++
+		} else {
+			di.FileCount++
+			di.DirSize += i.Fi.Size()
+		}
+	}
+	di.DirCount--
+	return di
 }
 
-// GetDirInfoRecurse is get size and count under the DirInfo recurse.
-func GetDirInfoRecurse(di DirInfo, opt Option) DirInfo {
-
-	var (
-		d = DirInfo{
-			Path:      di.Path,
-			Size:      di.Size,
-			FileCount: di.FileCount,
-			DirCount:  di.DirCount,
-			Err:       di.Err,
-			Sub:       di.Sub,
-		}
-	)
-
-	if d.Err != nil {
-		return d
-	}
-
-	for _, sub := range di.Sub {
-		if sub.Err != nil {
-			if opt.ErrSkip {
-				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", sub.Err)
-				continue
-			}
-			d.Err = sub.Err
-			return d
-		}
-		subDi := GetDirInfoRecurse(*sub, opt)
-		if subDi.Err != nil {
-			if opt.ErrSkip {
-				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", subDi.Err)
-				continue
-			}
-			d.Err = subDi.Err
-			return d
-		}
-		d.FileCount += subDi.FileCount
-		d.DirCount += subDi.DirCount
-		d.Size += subDi.Size
-	}
-
-	return d
-}
-
-// GetDirInfo is get size and count the directory.
-func GetDirInfo(root string, opt Option) (DirInfo, error) {
-
-	dis, err := GetDirInfoAll(root, opt)
-	if err != nil {
-		return DirInfo{}, err
-	}
-
-	for di := range dis {
-		if di.Err != nil {
-			if opt.ErrSkip {
-				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", di.Err)
-				continue
-			}
-			return DirInfo{}, di.Err
-		}
-		if di.Path == root {
-			return GetDirInfoRecurse(di, opt), nil
-		}
-	}
-
-	return DirInfo{}, fmt.Errorf("Error occured")
-}
-
-func getItem(root string, opt Option, target string) (chan Info, error) {
+func getInfo(root string, opt Option) (chan Info, error) {
 	var (
 		err       error
-		fn        func(p string)
-		match     *regexp.Regexp
-		ignore    *regexp.Regexp
-		q         = make(chan Info)
+		fn        func(string)
 		wg        = new(sync.WaitGroup)
+		q         = make(chan Info, 20)
 		semaphore = make(chan struct{}, runtime.NumCPU())
 	)
 
-	// Check root is directory.
-	if !IsExistDir(root) {
-		return nil, fmt.Errorf("[%s] is not a directory", root)
+	// Check exist.
+	if !IsExist(root) {
+		return nil, fmt.Errorf("[%s] is not found", root)
 	}
 
-	if len(opt.Matches) != 0 {
-		match, err = core.CompileStrs(opt.Matches)
-		if err != nil {
-			return nil, err
+	// qInfo check option and send or not.
+	qInfo := func(info Info) {
+		if info.Err != nil {
+			q <- info
+			return
 		}
-	}
-	if len(opt.Ignores) != 0 {
-		ignore, err = core.CompileStrs(opt.Ignores)
-		if err != nil {
-			return nil, err
+
+		// Check option.
+		if (!opt.getFile && !info.Fi.IsDir()) ||
+			(!opt.getDir && info.Fi.IsDir()) {
+			// Not send.
+		} else if opt.matchRe != nil && opt.matchRe.MatchString(info.Path) {
+			// Send.
+			q <- info
+		} else if opt.ignoreRe != nil && opt.ignoreRe.MatchString(info.Path) {
+			// Not send.
+		} else if opt.matchRe == nil {
+			// Send.
+			q <- info
 		}
 	}
 
-	// Get file list func.
 	fn = func(p string) {
-		var info Info
-
 		semaphore <- struct{}{}
 		defer func() {
 			wg.Done()
 			<-semaphore
 		}()
 
-		fis, err := ioutil.ReadDir(p)
-		if err != nil {
-			if opt.ErrSkip {
-				fmt.Fprintf(os.Stderr, "Warning: [%s] continue.\n", err)
-				return
-			}
-			info.Err = err
-			q <- info
+		// Send p.
+		i := Info{Path: p}
+		i.Fi, i.Err = os.Stat(p)
+		qInfo(i)
+		if i.Err != nil {
 			return
 		}
+
+		// File pattern.
+		if !i.Fi.IsDir() {
+			return
+		}
+
+		fis, err := ioutil.ReadDir(p)
+		if err != nil {
+			i.Err = err
+			qInfo(i)
+			return
+		}
+
 		for _, fi := range fis {
-			info.Path = filepath.Join(p, fi.Name())
-			// Check ignore.
-			if ignore != nil && ignore.MatchString(info.Path) {
-				continue
+			i := Info{
+				Path: filepath.Join(p, fi.Name()),
+				Fi:   fi,
 			}
-
-			info.Fi = fi
-
-			if fi.IsDir() {
-				if target != "file" {
-					if match == nil || match.MatchString(info.Path) {
-						q <- info
-					}
-				}
-				if opt.Recurse {
-					wg.Add(1)
-					go fn(info.Path)
-				}
+			if fi.IsDir() && opt.Recurse {
+				wg.Add(1)
+				go fn(i.Path)
 			} else {
-				if target != "dir" {
-					if match == nil || match.MatchString(info.Path) {
-						q <- info
-					}
-				}
+				qInfo(i)
 			}
 		}
 	}
 
 	// Start get item list.
-	wg.Add(1)
-	go fn(root)
-
-	// Wait.
 	go func() {
+		wg.Add(1)
+		fn(root)
 		wg.Wait()
 		close(q)
 	}()
@@ -407,4 +289,22 @@ func IsShare(path string) bool {
 		return true
 	}
 	return false
+}
+
+func compileRegexps(opt Option) (Option, error) {
+	var err error
+	// Compile regexp.
+	if len(opt.Matches) != 0 {
+		opt.matchRe, err = core.CompileStrs(opt.Matches)
+		if err != nil {
+			return opt, err
+		}
+	}
+	if len(opt.Ignores) != 0 {
+		opt.ignoreRe, err = core.CompileStrs(opt.Ignores)
+		if err != nil {
+			return opt, err
+		}
+	}
+	return opt, err
 }
