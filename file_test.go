@@ -451,6 +451,62 @@ func TestGetDirInfo(t *testing.T) {
 
 }
 
+// TestGetDirInfos is test GetDirInfos func.
+func TestGetDirInfos(t *testing.T) {
+	var (
+		temp         string
+		afc, adc, as int64
+
+		efc int64 = fileCnt*2 + dirCnt*4
+		edc int64 = dirCnt * 4
+		es  int64 = 4 * 3
+	)
+	temp = setup3()
+	t.Log(temp)
+	defer shutdown(temp)
+
+	f0 := filepath.Join(temp, "file0")
+	d0f0 := filepath.Join(filepath.Join(temp, "dir0"), "file0")
+	d0d0f0 := filepath.Join(filepath.Join(filepath.Join(temp, "dir0"), "dir0"), "file0")
+
+	err = ioutil.WriteFile(f0, []byte{'t', 'e', 's', 't'}, os.ModePerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ioutil.WriteFile(d0f0, []byte{'t', 'e', 's', 't'}, os.ModePerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ioutil.WriteFile(d0d0f0, []byte{'t', 'e', 's', 't'}, os.ModePerm)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dis, err := GetDirInfos(temp, Option{Recurse: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for di := range dis {
+		t.Log(di.Path, di.DirSize, di.DirCount, di.FileCount)
+		if di.Path == temp {
+			afc = di.FileCount
+			adc = di.DirCount
+			as = di.DirSize
+
+			if afc != efc {
+				t.Fatalf("File count expected: [%d] but actual: [%d]\n", efc, afc)
+			}
+			if adc != edc {
+				t.Fatalf("Dir count expected: [%d] but actual: [%d]\n", edc, adc)
+			}
+			if as != es {
+				t.Fatalf("Size expected: [%d] but actual: [%d]\n", es, as)
+			}
+		}
+	}
+}
+
 // TestMain is entry point.
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())

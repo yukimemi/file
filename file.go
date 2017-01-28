@@ -150,6 +150,135 @@ func ShareToAbs(path string) string {
 	return path
 }
 
+// GetDirInfos return DirSize, FileCount and DirCount under the path.
+func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
+	var (
+		err error
+		fn  func(string, chan DirInfo) DirInfo
+		q   = make(chan DirInfo, 20)
+		sem = make(chan struct{}, runtime.NumCPU())
+	)
+
+	// Check exist.
+	if !IsExistDir(root) {
+		return nil, fmt.Errorf("[%s] is not a directory", root)
+	}
+
+	// Compile regexp.
+	opt, err = compileRegexps(opt)
+	if err != nil {
+		return nil, err
+	}
+	opt.getDir = true
+
+	// qInfo check option and send or not.
+	qInfo := func(dInfo DirInfo) {
+		if dInfo.Err != nil {
+			q <- dInfo
+			return
+		}
+
+		// Check option.
+		if (!opt.getFile && !dInfo.Fi.IsDir()) ||
+			(!opt.getDir && dInfo.Fi.IsDir()) {
+			// Not send.
+		} else if opt.matchRe != nil && opt.matchRe.MatchString(dInfo.Path) {
+			// Send.
+			q <- dInfo
+		} else if opt.ignoreRe != nil && opt.ignoreRe.MatchString(dInfo.Path) {
+			// Not send.
+		} else if opt.matchRe == nil {
+			// Send.
+			q <- dInfo
+		}
+	}
+
+	fn = func(p string, toParent chan DirInfo) DirInfo {
+
+		wg := new(sync.WaitGroup)
+		fromChild := make(chan DirInfo, 20)
+		i := Info{Path: p}
+		di := DirInfo{Info: i}
+		di.Fi, di.Err = os.Stat(p)
+		if di.Err != nil {
+			qInfo(di)
+			return di
+		}
+
+		fis, err := ioutil.ReadDir(p)
+		if err != nil {
+			di.Err = err
+			qInfo(di)
+			if toParent != nil {
+				toParent <- di
+			}
+			return di
+		}
+
+		for _, fi := range fis {
+			if fi.IsDir() {
+				di.DirCount++
+				if opt.Recurse {
+					path := filepath.Join(p, fi.Name())
+					select {
+					case sem <- struct{}{}:
+						// Async.
+						wg.Add(1)
+						go func(fi os.FileInfo) {
+							defer wg.Done()
+							fn(path, fromChild)
+							<-sem
+						}(fi)
+					default:
+						// Sync.
+						d := fn(path, nil)
+						if d.Err != nil {
+							di.Err = d.Err
+						}
+						di.DirSize += d.DirSize
+						di.DirCount += d.DirCount
+						di.FileCount += d.FileCount
+					}
+				}
+			} else {
+				di.FileCount++
+				di.DirSize += fi.Size()
+			}
+		}
+
+		// Async wait.
+		go func() {
+			wg.Wait()
+			close(fromChild)
+		}()
+
+		// Get from child data.
+		for cDi := range fromChild {
+			if cDi.Err != nil {
+				di.Err = cDi.Err
+			}
+			di.DirSize += cDi.DirSize
+			di.DirCount += cDi.DirCount
+			di.FileCount += cDi.FileCount
+		}
+
+		// Send.
+		qInfo(di)
+		if toParent != nil {
+			toParent <- di
+		}
+		return di
+	}
+
+	// Start and async wait.
+	go func() {
+		fn(root, nil)
+		close(q)
+	}()
+
+	return q, err
+}
+
 // GetDirInfo return DirSize, FileCount and DirCount.
 func GetDirInfo(path string) DirInfo {
 
@@ -180,11 +309,11 @@ func GetDirInfo(path string) DirInfo {
 
 func getInfo(root string, opt Option) (chan Info, error) {
 	var (
-		err       error
-		fn        func(string)
-		wg        = new(sync.WaitGroup)
-		q         = make(chan Info, 20)
-		semaphore = make(chan struct{}, runtime.NumCPU())
+		err error
+		fn  func(string)
+		wg  = new(sync.WaitGroup)
+		q   = make(chan Info, 20)
+		sem = make(chan struct{}, runtime.NumCPU())
 	)
 
 	// Check exist.
@@ -215,11 +344,6 @@ func getInfo(root string, opt Option) (chan Info, error) {
 	}
 
 	fn = func(p string) {
-		semaphore <- struct{}{}
-		defer func() {
-			wg.Done()
-			<-semaphore
-		}()
 
 		// Send p.
 		i := Info{Path: p}
@@ -247,17 +371,27 @@ func getInfo(root string, opt Option) (chan Info, error) {
 				Fi:   fi,
 			}
 			if fi.IsDir() && opt.Recurse {
-				wg.Add(1)
-				go fn(i.Path)
+				select {
+				case sem <- struct{}{}:
+					// Async.
+					wg.Add(1)
+					go func(p string) {
+						defer wg.Done()
+						fn(p)
+						<-sem
+					}(i.Path)
+				default:
+					// Sync.
+					fn(i.Path)
+				}
 			} else {
 				qInfo(i)
 			}
 		}
 	}
 
-	// Start get item list.
+	// Async start get Info list.
 	go func() {
-		wg.Add(1)
 		fn(root)
 		wg.Wait()
 		close(q)
