@@ -47,6 +47,14 @@ type DirInfo struct {
 	FileCount int64
 }
 
+// PathInfo is path information.
+type PathInfo struct {
+	File string
+	Dir  string
+	Name string
+	Info os.FileInfo
+}
+
 var (
 	shareRe1 = regexp.MustCompile(`\\\\([^\\]+)\\(.)\$\\(.*)`)
 	shareRe2 = regexp.MustCompile(`\\\\([^\\]+)\\(.)\$`)
@@ -108,6 +116,23 @@ func GetDir(root string, opt Option) Info {
 // GetInfo return file and directory info.
 func GetInfo(root string, opt Option) Info {
 	return asyncToSync(root, opt, GetInfos)
+}
+
+// GetPathInfo get PathInfo.
+func GetPathInfo(path string) (PathInfo, error) {
+	var (
+		err error
+		pi  = PathInfo{File: path}
+	)
+
+	pi.Dir = filepath.Dir(pi.File)
+	pi.Name = core.BaseName(pi.File)
+
+	pi.Info, err = os.Stat(pi.File)
+	if err != nil {
+		return pi, err
+	}
+	return pi, nil
 }
 
 // IsExist is check file or directory exist.

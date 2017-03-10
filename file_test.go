@@ -507,6 +507,39 @@ func TestGetDirInfos(t *testing.T) {
 	}
 }
 
+// TestGetPathInfo is test GetPathInfo func.
+func TestGetPathInfo(t *testing.T) {
+
+	var err error
+
+	tmp, err := ioutil.TempDir("", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer shutdown(tmp)
+
+	test := filepath.Join(tmp, "testfile.txt")
+	os.Create(test)
+
+	pi, err := GetPathInfo(test)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if pi.File != test {
+		t.Fatalf("Expected: [%v] but actual: [%v]\n", pi.File, test)
+	}
+
+	if pi.Dir != tmp {
+		t.Fatalf("Expected: [%v] but actual: [%v]\n", pi.Dir, tmp)
+	}
+
+	if pi.Name != "testfile" {
+		t.Fatalf("Expected: [%v] but actual: [%v]\n", pi.Name, "testfile")
+	}
+}
+
 // TestMain is entry point.
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
