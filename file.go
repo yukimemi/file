@@ -22,21 +22,23 @@ const (
 
 // Option is option of GetFiles func.
 type Option struct {
-	Matches  []string
-	Ignores  []string
-	Recurse  bool
+	Matches []string
+	Ignores []string
+	Recurse bool
+	Depth   int
+
 	matchRe  *regexp.Regexp
 	ignoreRe *regexp.Regexp
 	getFile  bool
 	getDir   bool
-	Depth    int
 }
 
 // Info is file information struct.
 type Info struct {
-	Path string
-	Fi   os.FileInfo
-	Err  error
+	Path  string
+	Fi    os.FileInfo
+	Depth int
+	Err   error
 }
 
 // DirInfo is directory information struct.
@@ -179,7 +181,8 @@ func ShareToAbs(path string) string {
 func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
 	var (
 		err error
-		fn  func(string, chan DirInfo) DirInfo
+		fn  func(string, int) DirInfo
+
 		q   = make(chan DirInfo, 20)
 		sem = make(chan struct{}, runtime.NumCPU())
 	)
@@ -197,32 +200,55 @@ func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
 	opt.getDir = true
 
 	// qInfo check option and send or not.
-	qInfo := func(dInfo DirInfo) {
-		if dInfo.Err != nil {
-			q <- dInfo
+	qInfo := func(info DirInfo) {
+		if info.Err != nil {
+			q <- info
 			return
 		}
 
-		// Check option.
-		if (!opt.getFile && !dInfo.Fi.IsDir()) ||
-			(!opt.getDir && dInfo.Fi.IsDir()) {
-			// Not send.
-		} else if opt.matchRe != nil && opt.matchRe.MatchString(dInfo.Path) {
-			// Send.
-			q <- dInfo
-		} else if opt.ignoreRe != nil && opt.ignoreRe.MatchString(dInfo.Path) {
-			// Not send.
-		} else if opt.matchRe == nil {
-			// Send.
-			q <- dInfo
+		// Check getFile option.
+		if !info.Fi.IsDir() && !opt.getFile {
+			return
+		}
+
+		// Check getDir option.
+		if info.Fi.IsDir() && !opt.getDir {
+			return
+		}
+
+		// Check Depth option.
+		if opt.Depth != 0 && (info.Depth > opt.Depth) {
+			return
+		}
+
+		if (info.Depth < opt.Depth) && !opt.Recurse {
+			return
+		}
+
+		// Check regexp.
+		if opt.matchRe != nil && opt.matchRe.MatchString(info.Path) {
+			q <- info
+			return
+		}
+
+		if opt.ignoreRe != nil && opt.ignoreRe.MatchString(info.Path) {
+			return
+		}
+
+		if opt.matchRe == nil {
+			q <- info
+			return
 		}
 	}
 
-	fn = func(p string, toParent chan DirInfo) DirInfo {
+	fn = func(p string, depth int) DirInfo {
 
 		wg := new(sync.WaitGroup)
 		fromChild := make(chan DirInfo, 20)
-		i := Info{Path: p}
+		i := Info{
+			Path:  p,
+			Depth: depth,
+		}
 		di := DirInfo{Info: i}
 		di.Fi, di.Err = os.Stat(p)
 		if di.Err != nil {
@@ -231,32 +257,30 @@ func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
 		}
 
 		fis, err := ioutil.ReadDir(p)
+		depth++
 		if err != nil {
 			di.Err = err
 			qInfo(di)
-			if toParent != nil {
-				toParent <- di
-			}
 			return di
 		}
 
 		for _, fi := range fis {
 			if fi.IsDir() {
 				di.DirCount++
-				if opt.Recurse {
+				if (i.Depth < opt.Depth) || opt.Recurse {
 					path := filepath.Join(p, fi.Name())
 					select {
 					case sem <- struct{}{}:
 						// Async.
 						wg.Add(1)
-						go func(fi os.FileInfo) {
+						go func(path string, depth int) {
 							defer wg.Done()
-							fn(path, fromChild)
+							fromChild <- fn(path, depth)
 							<-sem
-						}(fi)
+						}(path, depth)
 					default:
 						// Sync.
-						d := fn(path, nil)
+						d := fn(path, depth)
 						if d.Err != nil {
 							di.Err = d.Err
 						}
@@ -289,15 +313,12 @@ func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
 
 		// Send.
 		qInfo(di)
-		if toParent != nil {
-			toParent <- di
-		}
 		return di
 	}
 
 	// Start and async wait.
 	go func() {
-		fn(root, nil)
+		fn(root, 0)
 		close(q)
 	}()
 
@@ -335,7 +356,8 @@ func GetDirInfo(path string) DirInfo {
 func getInfo(root string, opt Option) (chan Info, error) {
 	var (
 		err error
-		fn  func(string)
+		fn  func(string, int)
+
 		wg  = new(sync.WaitGroup)
 		q   = make(chan Info, 20)
 		sem = make(chan struct{}, runtime.NumCPU())
@@ -353,25 +375,48 @@ func getInfo(root string, opt Option) (chan Info, error) {
 			return
 		}
 
-		// Check option.
-		if (!opt.getFile && !info.Fi.IsDir()) ||
-			(!opt.getDir && info.Fi.IsDir()) {
-			// Not send.
-		} else if opt.matchRe != nil && opt.matchRe.MatchString(info.Path) {
-			// Send.
+		// Check getFile option.
+		if !info.Fi.IsDir() && !opt.getFile {
+			return
+		}
+
+		// Check getDir option.
+		if info.Fi.IsDir() && !opt.getDir {
+			return
+		}
+
+		// Check Depth option.
+		if opt.Depth != 0 && (info.Depth > opt.Depth) {
+			return
+		}
+
+		if (info.Depth < opt.Depth) && !opt.Recurse {
+			return
+		}
+
+		// Check regexp.
+		if opt.matchRe != nil && opt.matchRe.MatchString(info.Path) {
 			q <- info
-		} else if opt.ignoreRe != nil && opt.ignoreRe.MatchString(info.Path) {
-			// Not send.
-		} else if opt.matchRe == nil {
-			// Send.
+			return
+		}
+
+		if opt.ignoreRe != nil && opt.ignoreRe.MatchString(info.Path) {
+			return
+		}
+
+		if opt.matchRe == nil {
 			q <- info
+			return
 		}
 	}
 
-	fn = func(p string) {
+	fn = func(p string, depth int) {
 
 		// Send p.
-		i := Info{Path: p}
+		i := Info{
+			Path:  p,
+			Depth: depth,
+		}
 		i.Fi, i.Err = os.Stat(p)
 		qInfo(i)
 		if i.Err != nil {
@@ -384,6 +429,7 @@ func getInfo(root string, opt Option) (chan Info, error) {
 		}
 
 		fis, err := ioutil.ReadDir(p)
+		depth++
 		if err != nil {
 			i.Err = err
 			qInfo(i)
@@ -392,22 +438,27 @@ func getInfo(root string, opt Option) (chan Info, error) {
 
 		for _, fi := range fis {
 			i := Info{
-				Path: filepath.Join(p, fi.Name()),
-				Fi:   fi,
+				Path:  filepath.Join(p, fi.Name()),
+				Fi:    fi,
+				Depth: depth,
 			}
-			if fi.IsDir() && opt.Recurse {
-				select {
-				case sem <- struct{}{}:
-					// Async.
-					wg.Add(1)
-					go func(p string) {
-						defer wg.Done()
-						fn(p)
-						<-sem
-					}(i.Path)
-				default:
-					// Sync.
-					fn(i.Path)
+			if fi.IsDir() {
+				if (i.Depth < opt.Depth) || opt.Recurse {
+					select {
+					case sem <- struct{}{}:
+						// Async.
+						wg.Add(1)
+						go func(p string, depth int) {
+							defer wg.Done()
+							fn(p, depth)
+							<-sem
+						}(i.Path, depth)
+					default:
+						// Sync.
+						fn(i.Path, depth)
+					}
+				} else {
+					qInfo(i)
 				}
 			} else {
 				qInfo(i)
@@ -417,7 +468,7 @@ func getInfo(root string, opt Option) (chan Info, error) {
 
 	// Async start get Info list.
 	go func() {
-		fn(root)
+		fn(root, 0)
 		wg.Wait()
 		close(q)
 	}()
