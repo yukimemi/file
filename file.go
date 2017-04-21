@@ -51,10 +51,11 @@ type DirInfo struct {
 
 // PathInfo is path information.
 type PathInfo struct {
-	File string
-	Dir  string
-	Name string
-	Info os.FileInfo
+	File     string
+	Dir      string
+	Name     string
+	FileName string
+	Info     os.FileInfo
 }
 
 var (
@@ -129,6 +130,7 @@ func GetPathInfo(path string) (PathInfo, error) {
 
 	pi.Dir = filepath.Dir(pi.File)
 	pi.Name = core.BaseName(pi.File)
+	pi.FileName = filepath.Base(pi.File)
 
 	pi.Info, err = os.Stat(pi.File)
 	if err != nil {
