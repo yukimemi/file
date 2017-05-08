@@ -2,13 +2,16 @@ package file
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yukimemi/core"
 )
@@ -26,11 +29,18 @@ type Option struct {
 	Ignores []string
 	Recurse bool
 	Depth   int
+	Times   []*Time
 
 	matchRe  *regexp.Regexp
 	ignoreRe *regexp.Regexp
 	getFile  bool
 	getDir   bool
+}
+
+// Time is filter time option.
+type Time struct {
+	Base time.Time
+	Ope  string
 }
 
 // Info is file information struct.
@@ -227,6 +237,31 @@ func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
 			return
 		}
 
+		// Check time.
+		if len(opt.Times) != 0 {
+			result := false
+			modTime := info.Fi.ModTime()
+
+			for _, t := range opt.Times {
+				base := t.Base
+				switch t.Ope {
+				case "before":
+					result = base.Before(modTime)
+				case "after":
+					result = base.After(modTime)
+				case "equal":
+					result = base.Equal(modTime)
+				default:
+					info.Err = fmt.Errorf("Option.Time.Ope: [%v] is not support", t.Ope)
+					q <- info
+					return
+				}
+				if !result {
+					return
+				}
+			}
+		}
+
 		// Check regexp.
 		if opt.matchRe != nil && opt.matchRe.MatchString(info.Path) {
 			q <- info
@@ -406,6 +441,31 @@ func getInfo(root string, opt Option) (chan Info, error) {
 			return
 		}
 
+		// Check time.
+		if len(opt.Times) != 0 {
+			result := false
+			modTime := info.Fi.ModTime()
+
+			for _, t := range opt.Times {
+				base := t.Base
+				switch t.Ope {
+				case "before":
+					result = base.Before(modTime)
+				case "after":
+					result = base.After(modTime)
+				case "equal":
+					result = base.Equal(modTime)
+				default:
+					info.Err = fmt.Errorf("Option.Time.Ope: [%v] is not support", t.Ope)
+					q <- info
+					return
+				}
+				if !result {
+					return
+				}
+			}
+		}
+
 		if opt.matchRe == nil {
 			q <- info
 			return
@@ -519,4 +579,80 @@ func compileRegexps(opt Option) (Option, error) {
 		}
 	}
 	return opt, err
+}
+
+// OsCopy is os specific copy command.
+func OsCopy(src, dst string) (*core.Cmd, error) {
+
+	var (
+		copyCmd string
+		copyArg []string
+	)
+	src = filepath.FromSlash(src)
+	dst = filepath.FromSlash(dst)
+	if runtime.GOOS == "windows" {
+		copyCmd = "cmd"
+		copyArg = []string{"/c", "copy"}
+	} else {
+		copyCmd = "cp"
+		copyArg = []string{"-pv"}
+	}
+
+	copyArg = append(copyArg, src, dst)
+
+	cmd := core.Cmd{Cmd: exec.Command(copyCmd, copyArg...)}
+	err := cmd.CmdRun()
+	if err != nil {
+		return &cmd, err
+	}
+	if cmd.ExitCode != 0 {
+		return &cmd, fmt.Errorf("copy command exit code: [%v]", cmd.ExitCode)
+	}
+
+	return &cmd, nil
+}
+
+// Copy is file copy using io.Copy.
+func Copy(src, dst string, overwrite bool) (int64, error) {
+
+	src = filepath.FromSlash(src)
+	dst = filepath.FromSlash(dst)
+	fs, err := os.Open(src)
+	if err != nil {
+		return -1, err
+	}
+	defer fs.Close()
+	fss, err := fs.Stat()
+	if err != nil {
+		return -1, err
+	}
+
+	if IsExist(dst) && !overwrite {
+		fds, err := os.Stat(dst)
+		if err != nil {
+			return -1, err
+		}
+
+		if fss.Size() == fds.Size() && fss.ModTime() == fds.ModTime() {
+			return 0, nil
+		}
+	}
+
+	ds, err := os.Create(dst)
+	if err != nil {
+		return -1, err
+	}
+	defer ds.Close()
+
+	n, err := io.Copy(ds, fs)
+	if err != nil {
+		return -1, err
+	}
+
+	err = os.Chtimes(dst, fss.ModTime(), fss.ModTime())
+	if err != nil {
+		return -1, err
+	}
+
+	return n, nil
 }

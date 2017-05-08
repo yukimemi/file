@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func setup() string {
@@ -17,7 +18,7 @@ func setup() string {
 	 * |	|	|-- foo (file)
 	 * |	|
 	 * |	|-- file0 (file)
-	 * |	|-- file1 (file)
+	 * |	|-- file1 (file) [3 days old]
 	 * |	|-- file2 (file)
 	 * |	|-- foo (dir)
 	 * |	|	|-- bar (file)
@@ -72,6 +73,9 @@ func setup() string {
 	os.Create(filepath.Join(dir1, "bar"))
 	os.Create(filepath.Join(dir1, "foo"))
 	os.Create(filepath.Join(dir1, "hoge"))
+
+	// Change mod time.
+	os.Chtimes(filepath.Join(dir0, "file1"), time.Now().Add(-3*24*time.Hour), time.Now().Add(-3*24*time.Hour))
 
 	return tmp
 }
@@ -535,6 +539,28 @@ func TestGetDepth(t *testing.T) {
 	a = GetDepth(p, '\\')
 	if a != e {
 		t.Fatalf("Expected: [%v] but actual: [%v]\n", e, a)
+	}
+}
+
+// TestGetTime test Option Time.
+func TestGetTime(t *testing.T) {
+
+	tmp := setup()
+	defer shutdown(tmp)
+
+	opt := Option{
+		Times: []*Time{
+			&Time{
+				Base: time.Now().Add(24 * 1 * time.Hour),
+				Ope:  "le",
+			},
+		},
+	}
+
+	exp := 1
+	cnt := getCnt(GetInfos, tmp, opt, t)
+	if cnt != exp {
+		t.Fatalf("Expected: [%d] but actual: [%d]\n", exp, cnt)
 	}
 }
 
