@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yukimemi/core"
 )
@@ -28,11 +29,18 @@ type Option struct {
 	Ignores []string
 	Recurse bool
 	Depth   int
+	Times   []Time
 
 	matchRe  *regexp.Regexp
 	ignoreRe *regexp.Regexp
 	getFile  bool
 	getDir   bool
+}
+
+// Time is filter time option.
+type Time struct {
+	Base time.Time
+	Ope  string
 }
 
 // Info is file information struct.
@@ -229,6 +237,37 @@ func GetDirInfos(root string, opt Option) (chan DirInfo, error) {
 			return
 		}
 
+		// Check time.
+		if len(opt.Times) != 0 {
+			result := false
+			modTime := info.Fi.ModTime()
+
+			for _, t := range opt.Times {
+				base := t.Base
+				switch t.Ope {
+				case "gt":
+					result = modTime.Unix()-base.Unix() > 0
+				case "ge":
+					result = modTime.Unix()-base.Unix() >= 0
+				case "lt":
+					result = modTime.Unix()-base.Unix() < 0
+				case "le":
+					result = modTime.Unix()-base.Unix() <= 0
+				case "eq":
+					result = modTime.Unix()-base.Unix() == 0
+				case "ne":
+					result = modTime.Unix()-base.Unix() != 0
+				default:
+					info.Err = fmt.Errorf("Option.Time.Ope: [%v] is not support", t.Ope)
+					q <- info
+					return
+				}
+				if !result {
+					return
+				}
+			}
+		}
+
 		// Check regexp.
 		if opt.matchRe != nil && opt.matchRe.MatchString(info.Path) {
 			q <- info
@@ -406,6 +445,37 @@ func getInfo(root string, opt Option) (chan Info, error) {
 
 		if opt.ignoreRe != nil && opt.ignoreRe.MatchString(info.Path) {
 			return
+		}
+
+		// Check time.
+		if len(opt.Times) != 0 {
+			result := false
+			modTime := info.Fi.ModTime()
+
+			for _, t := range opt.Times {
+				base := t.Base
+				switch t.Ope {
+				case "gt":
+					result = modTime.Unix()-base.Unix() > 0
+				case "ge":
+					result = modTime.Unix()-base.Unix() >= 0
+				case "lt":
+					result = modTime.Unix()-base.Unix() < 0
+				case "le":
+					result = modTime.Unix()-base.Unix() <= 0
+				case "eq":
+					result = modTime.Unix()-base.Unix() == 0
+				case "ne":
+					result = modTime.Unix()-base.Unix() != 0
+				default:
+					info.Err = fmt.Errorf("Option.Time.Ope: [%v] is not support", t.Ope)
+					q <- info
+					return
+				}
+				if !result {
+					return
+				}
+			}
 		}
 
 		if opt.matchRe == nil {
