@@ -91,7 +91,7 @@ func getCnt(fn func(string, Option) (chan Info, error), root string, opt Option,
 	}
 	cnt := 0
 	for i := range infos {
-		t.Log(i.Path)
+		t.Log(i.Path, i.Fi.ModTime())
 		cnt++
 	}
 	return cnt
@@ -549,10 +549,15 @@ func TestGetTime(t *testing.T) {
 	defer shutdown(tmp)
 
 	opt := Option{
-		Times: []*Time{
-			&Time{
-				Base: time.Now().Add(24 * 1 * time.Hour),
-				Ope:  "le",
+		Recurse: true,
+		Times: []Time{
+			Time{
+				Base: time.Now().Add(-2 * 24 * time.Hour),
+				Ope:  "lt",
+			},
+			Time{
+				Base: time.Now().Add(-4 * 24 * time.Hour),
+				Ope:  "gt",
 			},
 		},
 	}
